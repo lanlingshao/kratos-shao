@@ -19,6 +19,9 @@ import (
 var _ Context = (*wrapper)(nil)
 
 // Context is an HTTP Context.
+// 我们可以看出,这个Context接口除了包括了原来的golang Context接口的外,还提供了:返回http相关信息,绑定对应http信息等方法
+// 简单来说,这个Context主要作用是转化层作用,就像前面说的:把pb文件标注的rpc service转化成http路由
+// http请求转化为grpc request,grpc返回转化为http响应
 type Context interface {
 	context.Context
 	Vars() url.Values

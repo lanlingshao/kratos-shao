@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -163,15 +164,15 @@ type Server struct {
 	network     string
 	address     string
 	timeout     time.Duration
-	filters     []FilterFunc
-	middleware  matcher.Matcher
-	decVars     DecodeRequestFunc
+	filters     []FilterFunc      // 过滤器
+	middleware  matcher.Matcher   // 中间件
+	decVars     DecodeRequestFunc // 请求vars解码 decodes the request vars to object.
 	decQuery    DecodeRequestFunc
 	decBody     DecodeRequestFunc
-	enc         EncodeResponseFunc
-	ene         EncodeErrorFunc
+	enc         EncodeResponseFunc // 错误返回编码
+	ene         EncodeErrorFunc    // 错误返回编码
 	strictSlash bool
-	router      *mux.Router
+	router      *mux.Router // 处理http路由,则采用了mux.Router来处理
 }
 
 // NewServer creates an HTTP server by options.
@@ -191,10 +192,18 @@ func NewServer(opts ...ServerOption) *Server {
 	}
 	srv.router.NotFoundHandler = http.DefaultServeMux
 	srv.router.MethodNotAllowedHandler = http.DefaultServeMux
+	// 设置srv的address、middleware、Filter等
 	for _, o := range opts {
 		o(srv)
 	}
+	// <<定义StrictSlash>>,kratos中默认为true,见github.com/gorilla/mux/mux.go
+	// StrictSlash defines the trailing slash behavior for new routes. The initial value is false.
+	// When true, if the route path is "/path/", accessing "/path" will perform a redirect
+	// to the former and vice versa. In other words, your application will always
+	// see the path as specified in the route.
 	srv.router.StrictSlash(srv.strictSlash)
+	// 设置请求的首个过滤器,放入srv.router的中间件middleware里,router的中间件是在router的匹配被找到后被调用
+	// 注意：srv也有中间件middleware，待研究区别 TODO
 	srv.router.Use(srv.filter())
 	srv.Server = &http.Server{
 		Handler:   FilterChain(srv.filters...)(srv.router),
@@ -270,9 +279,12 @@ func (s *Server) ServeHTTP(res http.ResponseWriter, req *http.Request) {
 	s.Handler.ServeHTTP(res, req)
 }
 
+// 和kratos grpc一样,把这个过滤器作为请求首个过滤器,把对应的服务器等相关信息放入Transport里面
+// 然后再把Transport放到Context里面传递给执行函数
 func (s *Server) filter() mux.MiddlewareFunc {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			fmt.Println("first filter in")
 			var (
 				ctx    context.Context
 				cancel context.CancelFunc
@@ -303,6 +315,7 @@ func (s *Server) filter() mux.MiddlewareFunc {
 			}
 			tr.request = req.WithContext(transport.NewServerContext(ctx, tr))
 			next.ServeHTTP(w, tr.request)
+			fmt.Println("first filter out")
 		})
 	}
 }
@@ -320,6 +333,8 @@ func (s *Server) Endpoint() (*url.URL, error) {
 }
 
 // Start start the HTTP server.
+// 有的web框架直接调用net.http.server中的ListenAndServe,
+// 但是在kratos框架则将listen和server分开调用，先在listenAndEndpoint中listen，再单独调用Serve
 func (s *Server) Start(ctx context.Context) error {
 	if err := s.listenAndEndpoint(); err != nil {
 		return err
@@ -346,6 +361,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	return s.Shutdown(ctx)
 }
 
+// 监听端口、生成用于服务注册的endpoint
 func (s *Server) listenAndEndpoint() error {
 	if s.lis == nil {
 		lis, err := net.Listen(s.network, s.address)

@@ -3,7 +3,6 @@ package kratos
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/signal"
 	"sync"
@@ -83,7 +82,8 @@ func (a *App) Endpoint() []string {
 
 // Run executes all OnStart hooks registered with the application's Lifecycle.
 func (a *App) Run() error {
-	// 通过 kratos.Server()声明的server实例,并通过 buildInstance() 转换成 *registry.ServiceInstance struct,用于服务注册
+	// 1、通过 kratos.Server()声明的server实例,并通过 buildInstance() 转换成 *registry.ServiceInstance struct,用于服务注册
+	// 2、在buildInstance中会先监听服务的地址（在server启动之前）
 	instance, err := a.buildInstance()
 	if err != nil {
 		return err
@@ -118,7 +118,6 @@ func (a *App) Run() error {
 		// 注意:下面需要利用WaitGroup来保证各个server启动后才继续进行下一步
 		wg.Add(1)
 		eg.Go(func() error {
-			fmt.Println("wg done")
 			// 服务启动成功后再进行下面的服务注册
 			wg.Done() // here is to ensure server start has begun running before register, so defer is not needed
 			// 任意一个server启动失败的时候,都会返回err.导致errgroup的ctx被取消
@@ -196,6 +195,7 @@ func (a *App) buildInstance() (*registry.ServiceInstance, error) {
 	if len(endpoints) == 0 {
 		for _, srv := range a.opts.servers {
 			if r, ok := srv.(transport.Endpointer); ok {
+				// 监听
 				e, err := r.Endpoint()
 				if err != nil {
 					return nil, err
